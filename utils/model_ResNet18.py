@@ -7,7 +7,7 @@ class ResidualBlock(Model):
         super(ResidualBlock, self).__init__()
         self.conv1 = Conv2D(filters, kernel_size=(3, 3), strides=strides, padding="same")
         self.bn1 = BatchNormalization()
-        self.relu = ReLU()
+        self.relu = ReLU()##########
         self.conv2 = Conv2D(filters, kernel_size=(3, 3), strides=1, padding="same")
         self.bn2 = BatchNormalization()
 

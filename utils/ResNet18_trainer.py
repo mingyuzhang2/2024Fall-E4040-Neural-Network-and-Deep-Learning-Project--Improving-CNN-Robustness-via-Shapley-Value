@@ -1,6 +1,8 @@
 import tensorflow as tf
 import datetime
-from utils.model_ResNet18 import ResNet18
+from tensorflow.keras import Model
+from tensorflow.keras.layers import Conv2D, BatchNormalization, ReLU, GlobalAveragePooling2D, Dense
+from utils.model_ResNet18 import ResNet18, ResidualBlock
 
 class ResNet18(Model):
     def __init__(self, num_classes):
@@ -42,18 +44,22 @@ class ResNet18(Model):
         x = self.fc(x)
         return x
 
-class ResNet18Trainer():
-    def __init__(self, X_train, y_train, X_val, y_val, epochs=10, batch_size=256, lr=1e-3):
+class ResNet18_trainer():
+    def __init__(self, X_train, y_train, X_val, y_val, num_classes, epochs, batch_size, lr, momentum, decay):
+        
         self.X_train = X_train.astype("float32")
         self.y_train = y_train.astype("float32")
         self.X_val = X_val.astype("float32")
         self.y_val = y_val.astype("float32")
+        self.num_classes = num_classes
         self.epochs = epochs
         self.batch_size = batch_size
         self.lr = lr
+        self.momentum = momentum
+        self.decay = decay
 
     def init_model(self):
-        self.model = ResNet18(num_classes=len(tf.unique(self.y_train)[0]))
+        self.model = ResNet18(num_classes=self.num_classes)
 
     def init_loss(self):
         self.loss_function = tf.keras.losses.SparseCategoricalCrossentropy()
@@ -64,8 +70,13 @@ class ResNet18Trainer():
         self.test_loss = tf.keras.metrics.Mean(name='test_loss')
         self.test_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='test_accuracy')
 
+
     def init_optimizer(self):
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.lr)
+        self.optimizer = tf.keras.optimizers.SGD(
+        learning_rate=self.lr,
+        momentum=self.momentum,
+        decay=self.decay
+    )
 
     def train_step(self, images, labels):
         with tf.GradientTape() as tape:
