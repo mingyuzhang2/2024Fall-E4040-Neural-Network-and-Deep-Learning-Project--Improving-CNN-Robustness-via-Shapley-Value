@@ -95,7 +95,7 @@ class NFCBank(tf.keras.Model):
         return conf_set
 
 
-class CSANetwork(tf.keras.Model):
+class CSANet(tf.keras.Model):
     def __init__(self, backbone=None, num_classes=10, conf_per_class=5000, use_conf=False, mask_alpha=None):
         super(CSANetwork, self).__init__()
         self.backbone = backbone

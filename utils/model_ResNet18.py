@@ -5,7 +5,6 @@ from tensorflow.keras import Model
 
 class ResidualBlock(Model):
     def __init__(self, filters, strides=1, downsample=False):
-        #super(ResidualBlock, self).__init__()
         super().__init__()
         self.conv1 = Conv2D(filters, kernel_size=(3, 3), strides=strides, padding="same")
         self.bn1 = BatchNormalization()
@@ -37,23 +36,18 @@ class ResidualBlock(Model):
 
 class ResNet18(Model):
     def __init__(self, num_classes):
-        #super(ResNet18, self).__init__()
         super().__init__()
         self.conv1 = Conv2D(64, kernel_size=(3, 3), strides=1, padding="same", 
                             kernel_regularizer=regularizers.l2(0.001))
         self.bn1 = BatchNormalization()
         self.relu = ReLU()
-        #self.maxpool = tf.keras.layers.MaxPooling2D(pool_size=(3, 3), strides=2, padding="same")
-        #self.conv2 = Conv2D(128, kernel_size=(3, 3), strides=1, padding="same", 
-                            #kernel_regularizer=regularizers.l2(0.001))
-        #self.bn2 = BatchNormalization()
 
         self.layer1 = self._build_resblock(64, 2, first_block=True)
         self.layer2 = self._build_resblock(128, 2, strides=2)
         self.layer3 = self._build_resblock(256, 2, strides=2)
         self.layer4 = self._build_resblock(512, 2, strides=2)
 
-        self.global_avg_pool = GlobalAveragePooling2D()#############?
+        self.global_avg_pool = GlobalAveragePooling2D()
         self.flatten = Flatten()
         self.fc = Dense(num_classes, activation="softmax")
         self.dropout = Dropout(0.5)
@@ -69,12 +63,7 @@ class ResNet18(Model):
 
     def call(self, x):
         x = self.conv1(x)
-        #x = self.bn1(x)
-        #x = self.relu(x)
-        #x = self.maxpool(x)
-        #x = self.conv2(x)
-        #x = self.bn2(x)
-
+       
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
