@@ -1,86 +1,278 @@
-import tensorflow as tf
+import torch
 import numpy as np
+import torch.nn.functional as F
+from torchvision.utils import save_image
 import os
+import time
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
+import matplotlib as mlt
 
-# Fast Fourier Transform (FFT) transformation
-def transform_fast_fourier_transform(img):
-    img = tf.reshape(img, [-1, *img.shape[-3:]]) if len(img.shape) > 3 else np.array(img)
+def transform_fft(img):
     if len(img.shape) > 3:
-        fft_result = [
-            tf.convert_to_tensor(np.fft.fftshift(np.fft.fft2(np.array(img[i]))))[None, ...]
-            for i in range(img.shape[0]]
+        img = tf.reshape(img, [-1, img.shape[-3], img.shape[-2], img.shape[-1]])
+        result = []
+        for i in range(img.shape[0]):
+            tmp = np.array(img[i])
+            tmp = np.fft.fft2(tmp)
+            tmp = np.fft.fftshift(tmp)
+            result.append(tf.convert_to_tensor(tmp, dtype=tf.complex64)[tf.newaxis, ...])
+        result = tf.concat(result, axis=0)
+        return result
     else:
-        fft_result = tf.convert_to_tensor(np.fft.fftshift(np.fft.fft2(img))
-    return tf.concat(fft_result, axis=0) if len(img.shape) > 3 else fft_result
+        img = np.array(img)
+        img = np.fft.fft2(img)
+        img = np.fft.fftshift(img)
+        return tf.convert_to_tensor(img, dtype=tf.complex64)
 
-# Inverse Fast Fourier Transform (IFFT) transformation
-def transform_inverse_fast_fourier_transform(img):
-    img = tf.reshape(img, [-1, *img.shape[-3:]]) if len(img.shape) > 3 else np.array(img)
-    ifft_result = []
-    for i in range(img.shape[0] if len(img.shape) > 3 else 1):
-        tmp = np.fft.ifft2(np.fft.ifftshift(np.array(img[i] if len(img.shape) > 3 else img)))
-        if np.abs(np.imag(tmp).sum()) > 1e-5:
-            raise ValueError(f"Imaginary part too large: {np.abs(np.imag(tmp).sum())}")
-        ifft_result.append(tf.convert_to_tensor(np.real(tmp), dtype=tf.float32)[None, ...])
-    return tf.concat(ifft_result, axis=0) if len(img.shape) > 3 else ifft_result[0]
+def transform_ifft(img):
+    if len(img.shape) > 3:
+        img = tf.reshape(img, [-1, img.shape[-3], img.shape[-2], img.shape[-1]])
+        result = []
+        for i in range(img.shape[0]):
+            tmp = np.array(img[i])
+            tmp = np.fft.ifft2(np.fft.ifftshift(tmp))
+            if np.abs(np.sum(np.imag(tmp))) > 1e-5:
+                raise ValueError(f"Imaginary part of reconstructed image is too large: {np.abs(np.sum(np.imag(tmp)))}")
+            result.append(tf.convert_to_tensor(np.real(tmp), dtype=tf.float32)[tf.newaxis, ...])
+        result = tf.concat(result, axis=0)
+        return result
+    else:
+        img = np.array(img)
+        img = np.fft.ifft2(np.fft.ifftshift(img))
+        if np.abs(np.sum(np.imag(img))) > 1e-5:
+            raise ValueError(f"Imaginary part of reconstructed image is too large: {np.abs(np.sum(np.imag(img)))}")
+        return tf.convert_to_tensor(np.real(img), dtype=tf.float32)
 
-# Monte Carlo Sampling for random masks
-def monte_carlo_sample_mask(img_w, img_h, mask_w, mask_h, static_center=False):
-    length, order = mask_w * mask_h + 1, np.random.permutation(np.arange(mask_w * mask_h))
-    mask = tf.ones((length, 3, mask_w, mask_h))
+# For an image of size C * H * W, sample a random order of H*W elements
+# Generate (H * W + 1 ) masks, elements are masked one by one by the order
+# Apply the mask on the image, (H * W + 1) * C * H * W
+# The output of the model is of size (H * W + 1) * N
+# Get the difference y[:-1] - y[1:]
+
+def sample_mask(img_w, img_h, mask_w, mask_h, static_center=False):
+    # Return a sampled mask, a tensor of size ((mask_w*mask_h)+1, img_w, img_h)
+    length = mask_w * mask_h + 1
+    order = np.random.permutation(np.arange(0, mask_w * mask_h, 1))  # Sample an order
+    mask = torch.ones(length, 3, mask_w, mask_h)
+    mask = mask.view(length, 3, -1)
     for j in range(1, length):
-        mask = tf.tensor_scatter_nd_update(
-            mask,
-            [[i, 0, order[j - 1]] for i in range(j, length)],
-            tf.zeros((length - j,))
-        )
-    mask = tf.image.resize(mask, [img_w, img_h], method="nearest")
+        mask[j:, :, order[j - 1]] = 0
+    mask = mask.view(length, 3, mask_w, mask_h)
     if static_center:
         mask[:, :, mask_w // 2, mask_h // 2] = 1
+    mask = F.interpolate(mask.clone(), size=[img_w, img_h], mode="nearest").float()
     return mask, order
 
-# Calculating Shapley values by pixel
-def ShapleyValue_pixel(img, label, model, sample_times, mask_size, k=0):
-    shap_value = tf.zeros((mask_size ** 2))
-    for _ in range(sample_times):
-        mask, order = monte_carlo_sample_mask(*img.shape[2:], mask_size, mask_size)
-        masked_img = tf.tile(img[k:k+1], [mask.shape[0], 1, 1, 1]) * mask
-        output = model(masked_img)
-        if tf.reduce_any(tf.math.is_nan(output)):
-            raise ValueError("NAN in output")
-        shap_value = tf.tensor_scatter_nd_add(
-            shap_value, tf.expand_dims(order, axis=1), (output[:-1, label[k]] - output[1:, label[k]]).numpy()
-        )
-    return shap_value / sample_times
+def getShapley_pixel(img, label, model, sample_times, mask_size, k=0):
+    b, c, w, h = img.size()
+    shap_value = torch.zeros((mask_size ** 2))
+    with torch.no_grad():
+        for i in range(sample_times):
+            mask, order = sample_mask(w, h, mask_size, mask_size)
+            base = img[k].expand(mask.size(0), 3, w, h).clone()
+            masked_img = base * mask.cuda()
+            output = model(masked_img)
+            if torch.any(torch.isnan(output)):
+                raise ValueError("NAN in output")
+            y = output[:, label[k]]
+            yy = y[:-1]
+            dy = yy - y[1:]
+            shap_value[order] += (dy.cpu())
+        shap_value /= sample_times
+    return shap_value
 
-# Calculating Shapley values in the frequency domain
-def ShapleyValue_frequency(img, label, model, sample_times, mask_size, k=0, n_per_batch=1, split_n=1, static_center=False, fix_masks=False, mask_path=None):
-    shap_value = tf.zeros((mask_size ** 2))
+def getShapley_freq(img, label, model, sample_times, mask_size, k=0, n_per_batch=1, split_n=1, static_center=False, fix_masks=False, mask_path=None):
+    b, c, w, h = img.size()
     length = mask_size ** 2 + 1
-    for i in range(sample_times // n_per_batch):
-        masks, orders = [], []
-        for _ in range(n_per_batch):
-            mask, order = monte_carlo_sample_mask(*img.shape[2:], mask_size, mask_size, static_center)
-            masks.append(mask)
-            orders.append(order)
-        masks = tf.concat(masks, axis=0)
-        base = tf.tile(transform_fast_fourier_transform(img[k:k+1]), [masks.shape[0], 1, 1, 1])
-        if split_n > 1:
-            outputs = [
-                model(tf.clip_by_value(transform_inverse_fast_fourier_transform(base[j * length:(j + 1) * length] * masks[j * length:(j + 1) * length]), 0., 1.))
-                for j in range(split_n)
-            ]
-        else:
-            outputs = [model(tf.clip_by_value(transform_inverse_fast_fourier_transform(base * masks), 0., 1.))]
-        output = tf.concat(outputs, axis=0)
-        for j in range(n_per_batch):
-            shap_value = tf.tensor_scatter_nd_add(
-                shap_value, tf.expand_dims(orders[j], axis=1),
-                (output[j * length:(j + 1) * length, label[k]][:-1] - output[j * length:(j + 1) * length, label[k]][1:]).numpy()
-            )
+    shap_value = torch.zeros((mask_size ** 2))
+    with torch.no_grad():
+        with torch.cuda.amp.autocast():
+            for i in range(sample_times // n_per_batch):
+                maskes = []
+                orders = []
+                if not fix_masks:
+                    for j in range(n_per_batch):
+                        mask, order = sample_mask(w, h, mask_size, mask_size, static_center=static_center)
+                        maskes.append(mask)
+                        orders.append(order)
+                    maskes = torch.cat(maskes, 0)
+                    assert maskes.size(0) == n_per_batch * length
+                else:
+                    maskes = torch.load(os.path.join(mask_path, f"mask_{i}.pth"))
+                    orders = torch.load(os.path.join(mask_path, f"order_{i}.pth"))
+                if split_n > 1:
+                    base = transform_fft(img[k])
+                    bs = maskes.size(0) // split_n
+                    outputs = []
+                    for j in range(maskes.size(0) // bs):
+                        if j == maskes.size(0) // bs - 1:
+                            current_mask = maskes[j * bs:]
+                        else:
+                            current_mask = maskes[j * bs:(j + 1) * bs]
+                        masked_img = base.expand(current_mask.size(0), 3, w, h).clone() * current_mask
+                        masked_img = transform_ifft(masked_img)
+                        masked_img = masked_img.cuda()
+                        masked_img = torch.clamp(masked_img, 0., 1.)
+                        outputs.append(model(masked_img))
+                    output = torch.cat(outputs, dim=0)
+                else:
+                    base = transform_fft(img[k]).expand(maskes.size(0), 3, w, h).clone()
+                    masked_img = base * maskes
+                    masked_img = transform_ifft(masked_img)
+                    masked_img = masked_img.cuda()
+                    masked_img = torch.clamp(masked_img, 0., 1.)
+                    output = model(masked_img)
+                for j in range(n_per_batch):
+                    y = output[j * length:(j + 1) * length, label[k]]
+                    yy = y[:-1]
+                    dy = yy - y[1:]
+                    if torch.any(torch.isnan(dy)):
+                        raise ValueError("Nan in dy")
+                    shap_value[orders[j]] += (dy.cpu())
+                if i % 100 == 0:
+                    print(f"{i}/{sample_times // n_per_batch}")
+        shap_value /= sample_times // n_per_batch * n_per_batch
+    return shap_value
+
+# Function to generate distance list
+def gen_dis_list(mask_w, mask_h):
+    dis_dict = dict()
+    for i in range(mask_w * mask_h):
+        dis = ((i // mask_w) - (mask_w / 2 - 0.5)) ** 2 + ((i % mask_w) - (mask_h / 2 - 0.5)) ** 2
+        if f"{dis:.2f}" not in dis_dict.keys():
+            dis_dict[f"{dis:.2f}"] = []
+        dis_dict[f"{dis:.2f}"].append(i)
+    dis = np.sort(np.array(list(dis_dict.keys()), dtype=float))
+    return dis_dict, dis
+
+# Function to sample mask with distance dictionary
+def sample_mask_dict(img_w, img_h, mask_w, mask_h, dis_dict, keys):
+    length = len(keys) + 1
+    order = np.random.permutation(np.arange(0, len(keys), 1))  # Sample an order
+    mask = np.ones((length, 3, mask_w, mask_h))
+    mask = mask.reshape(length, 3, -1)
+    for j in range(1, length):
+        points = dis_dict[f"{keys[order[j-1]]:.2f}"]
+        mask[j:, :, points] = 0
+    mask = mask.reshape(length, 3, mask_w, mask_h)
+    mask = tf.image.resize(mask, [img_w, img_h], method="nearest")
+    return tf.convert_to_tensor(mask, dtype=tf.float32), order
+
+# TensorFlow implementation of getShapley_freq_dis
+def getShapley_freq_dis(img, label, model, sample_times, mask_size, k=0):
+    b, w, h, c = img.shape
+    shap_value = np.zeros((mask_size ** 2), dtype=np.float32)
+    dis_dict, dis = gen_dis_list(mask_size, mask_size)
+
+    for i in range(sample_times):
+        # Generate mask and order
+        mask, order = sample_mask_dict(w, h, mask_size, mask_size, dis_dict, dis)
+
+        # Apply FFT transformation and masking
+        base = transform_fft(img[k]).numpy()
+        base = np.tile(base, (mask.shape[0], 1, 1, 1))
+        masked_img = base * mask.numpy()
+        masked_img = transform_ifft(tf.convert_to_tensor(masked_img))
+
+        # Ensure values are within valid range
+        masked_img = tf.clip_by_value(masked_img, 0.0, 1.0)
+
+        # Model inference
+        output = model(masked_img, training=False)
+        y = output[:, label[k]]
+        yy = y[:-1]
+        dy = yy - y[1:]
+
+        if tf.reduce_any(tf.math.is_nan(dy)):
+            raise ValueError("Nan in dy")
+
+        # Accumulate Shapley values
+        for j in range(len(dy)):
+            indices = dis_dict[f"{dis[order[j]]:.2f}"]
+            shap_value[indices] += dy[j].numpy()
+
         if i % 100 == 0:
-            print(f"{i}/{sample_times // n_per_batch}")
-    return shap_value / sample_times
+            print(f"{i}/{sample_times}")
+
+    shap_value /= sample_times
+    return shap_value
+
+
+def getShapley_freq_softmax(img, label, model, sample_times, mask_size, k=0, n_per_batch=1, split_n=1, static_center=False):
+    b, w, h, c = img.shape
+    shap_value = np.zeros((mask_size ** 2), dtype=np.float32)
+
+    for i in range(sample_times // n_per_batch):
+        # Generate mask and order
+        mask, order = sample_mask_dict(w, h, mask_size, mask_size, {}, np.arange(mask_size ** 2))
+
+        # Apply FFT transformation and masking
+        base = transform_fft(img[k]).numpy()
+        base = np.tile(base, (mask.shape[0], 1, 1, 1))
+        masked_img = base * mask.numpy()
+        masked_img = transform_ifft(tf.convert_to_tensor(masked_img))
+
+        # Ensure values are within valid range
+        masked_img = tf.clip_by_value(masked_img, 0.0, 1.0)
+
+        # Model inference
+        output = tf.nn.softmax(model(masked_img, training=False), axis=1)
+        y = output[:, label[k]]
+        yy = y[:-1]
+        dy = yy - y[1:]
+
+        if tf.reduce_any(tf.math.is_nan(dy)):
+            raise ValueError("Nan in dy")
+
+        # Accumulate Shapley values
+        shap_value[order] += dy.numpy()
+
+        if i % 100 == 0:
+            print(f"{i}/{sample_times}")
+
+    shap_value /= sample_times
+    return shap_value
 
 
 
+
+
+def visual_shap(shap_value, w, h, img_path):
+    max_value = torch.topk(shap_value, 1)[0].item()
+    min_value = torch.topk(shap_value, 1, largest=False)[0].item()
+    maximum = max([abs(max_value), abs(min_value)])
+
+    shap_value = shap_value.view(w, h)
+    plt.figure()
+    norm = Normalize(vmin=-maximum, vmax=maximum)
+    plt.imshow(shap_value, norm=norm, cmap=mlt.cm.bwr)
+    plt.gca().get_yaxis().set_visible(False)  # Hide y-axis
+    plt.gca().get_xaxis().set_visible(False)  # Hide x-axis
+    plt.colorbar()
+    plt.tight_layout()
+    plt.savefig(img_path, format='pdf')
+    plt.close()
+
+def visual_shap_w_tick(shap_value, w, h, img_path):
+    max_value = torch.topk(shap_value, 1)[0].item()
+    min_value = torch.topk(shap_value, 1, largest=False)[0].item()
+    maximum = max([abs(max_value), abs(min_value)])
+
+    x_spec = [i for i in range(w)]
+    x_shift_spec = np.fft.fftshift(x_spec)
+    y_spec = [i for i in range(h)]
+    y_shift_spec = np.fft.fftshift(y_spec)
+
+    shap_value = shap_value.view(w, h)
+    plt.figure()
+    norm = Normalize(vmin=-maximum, vmax=maximum)
+    plt.imshow(shap_value, norm=norm, cmap=mlt.cm.bwr)
+    plt.xticks(x_spec, x_shift_spec)
+    plt.yticks(y_spec, y_shift_spec)
+    plt.colorbar()
+    plt.tight_layout()
+    plt.savefig(img_path, format='svg')
+    plt.close()
+
+    
