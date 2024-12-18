@@ -7,12 +7,12 @@ from tensorflow.keras.callbacks import LearningRateScheduler
 import os
 import random
 
-def set_seed(seed_value=42):
-    random.seed(seed_value)
-    #np.random.seed(seed_value)
-    tf.random.set_seed(seed_value)
+#def set_seed(seed_value=42):
+#    random.seed(seed_value)
+#    #np.random.seed(seed_value)
+#    tf.random.set_seed(seed_value)
 
-set_seed(42)
+#set_seed(42)
 
 
 
@@ -51,10 +51,14 @@ def load_cifar10_dataset(batch_size):
 
 
 
+
+
+
+
 def learning_rate_schedule(epoch):
-    if epoch >= 1 and epoch <= 120:
+    if epoch >= 1 and epoch <= 90:
         return 0.1
-    elif epoch > 120 and epoch <= 160:
+    elif epoch > 90 and epoch <= 120:
         return 0.01
     else:
         return 0.001
