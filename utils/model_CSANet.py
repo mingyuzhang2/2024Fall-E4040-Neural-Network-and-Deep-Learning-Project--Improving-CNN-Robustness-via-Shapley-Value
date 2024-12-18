@@ -42,7 +42,7 @@ class NFCBank(tf.keras.Model):
         conf_set = tf.concat(conf_set, axis=0)
 
 ############################################
-        self.confounder_queue = tf.Variable(conf_set)
+        self.confounder_queue = tf.Variable(conf_set, trainable=True)
         #_, class_num, _, _ = self.confounder_queue.shape
         class_num= self.confounder_queue.shape
         print(self.confounder_queue.shape)
@@ -78,29 +78,13 @@ class NFCBank(tf.keras.Model):
 
 
 class CSANet(tf.keras.Model):
-    def __init__(self, backbone=None, num_classes=10, conf_per_class=5000, use_conf=False, mask_alpha=None, conf_path=None):
-        #super(CSANetwork, self).__init__()
+    def __init__(self, backbone=None, num_classes=10, conf_per_class=5000, conf_path=None):
         super().__init__()
         self.backbone = backbone
         self.erb = NFCBank(conf_path=conf_path, num_classes=num_classes, conf_per_class=conf_per_class)
-        self.test_CSA = use_conf
-        self.mask_alpha = mask_alpha
-        if self.test_CSA:
-            print("Test with CSA")
+       
+
 
     def call(self, x):
-        if self.test_CSA and not self.training:
-            output = self.backbone(x)
-            y_pred = tf.argmax(output, axis=1)###########
-            x, x_conf = self.split_x(x, y_pred)
-            x_new = x + self.mask_alpha * x_conf
-            preds = self.backbone(x_new)
-        else:
-            preds = self.backbone(x)
+        preds = self.backbone(x)
         return preds
-
-    def split_x(self, x, y):
-        x_v_set = self.erb.batch_sample_set(x, y)
-        x_v_att = tf.reduce_mean(x_v_set, axis=1)
-
-        return x, x_v_att
