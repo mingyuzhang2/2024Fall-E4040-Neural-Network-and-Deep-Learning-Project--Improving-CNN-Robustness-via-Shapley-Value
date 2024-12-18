@@ -154,7 +154,7 @@ class CSANet_trainer():
         
 
     def train_epoch(self, epoch):
-        
+        start_time = datetime.datetime.now()
         self.train_loss.reset_states()
         self.train_accuracy.reset_states()
         self.test_loss.reset_states()
@@ -169,8 +169,12 @@ class CSANet_trainer():
 
         for test_images, test_labels in self.test_ds:
             self.test_step(test_images, test_labels)
+        
+        end_time = datetime.datetime.now()
+        epoch_duration = end_time - start_time
 
-        print(f'Epoch {epoch + 1}, Loss: {self.train_loss.result()}, Accuracy: {self.train_accuracy.result() * 100}, Test Loss: {self.test_loss.result()}, Test Accuracy: {self.test_accuracy.result() * 100}')
+        print(f'Epoch {epoch + 1}, Loss: {self.train_loss.result()}, Accuracy: {self.train_accuracy.result() * 100}, Test Loss: {self.test_loss.result()}, Test Accuracy: {self.test_accuracy.result() * 100}, Training Time: {epoch_duration}')
+        
         
         self.train_loss_history.append(self.train_loss.result().numpy())
         self.train_accuracy_history.append(self.train_accuracy.result().numpy() * 100)
@@ -196,6 +200,7 @@ class CSANet_trainer():
             
 
     def run(self):
+        training_start_time = datetime.datetime.now()
         self.init_model()
         self.init_loss()
         self.init_optimizer()
@@ -212,5 +217,9 @@ class CSANet_trainer():
         for epoch in range(epoch_start, self.epochs):
             print(f"Training Epoch {epoch + 1}")
             self.train_epoch(epoch)
-            
             self.save_checkpoint(epoch)
+            
+        training_end_time = datetime.datetime.now()
+        total_training_duration = training_end_time - training_start_time
+
+        print(f'Total Training Time: {total_training_duration}')
