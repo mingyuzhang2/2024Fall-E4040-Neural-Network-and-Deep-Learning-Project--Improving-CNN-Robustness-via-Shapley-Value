@@ -11,68 +11,45 @@ class NFCBank(tf.keras.Model):
         super().__init__()
         #if conf_path is not None:
         #    cfg.train.conf_path = conf_path
+        self.conf_path = conf_path
         conf_set = [[] for _ in range(num_classes)]
-        if isinstance(cfg.train.conf_path, list):###################
-            for path in cfg.train.conf_path:######################
-                for i in range(num_classes):
-                    num = 0
-                    shap_path = os.path.join(path, f"{i}")
-                    assert Path(shap_path).exists()
-                    files = os.listdir(shap_path)######################
-                    for f in files:
-                        if "neg.pt" in f:
-                            num += 1
-                    if num < conf_per_class:
-                        conf_per_class = num
-                for i in range(num_classes):
-                    shap_path = os.path.join(path, f"{i}")######################
-                    assert Path(shap_path).exists()
-                    files = os.listdir(shap_path)
-                    num = 0
-                    for f in files:
-                        if "neg.pt" in f and num < conf_per_class:######################
-                            image = tf.io.read_file(os.path.join(shap_path, f))#######
-                            image = tf.image.decode_jpeg(image, channels=3)
-                            image = tf.cast(image, tf.float32) / 255.0
-                            conf_set[i].append(image)
-                            num += 1
-            for i in range(num_classes):
-                conf_set[i] = tf.stack(conf_set[i], axis=0)######################
-            conf_set = tf.concat(conf_set, axis=0)
-        else:
-            path = cfg.train.conf_path######################
-            for i in range(num_classes):
-                num = 0
-                shap_path = os.path.join(path, f"{i}")
-                assert Path(shap_path).exists()
-                files = os.listdir(shap_path)
-                for f in files:
-                    if "neg.pt" in f:
-                        num += 1
-                if num < conf_per_class:
-                    conf_per_class = num
-            for i in range(num_classes):
-                shap_path = os.path.join(path, f"{i}")
-                assert Path(shap_path).exists()
-                files = os.listdir(shap_path)
-                num = 0
-                for f in files:
-                    if "neg.pt" in f and num < conf_per_class:
-                        image = tf.io.read_file(os.path.join(shap_path, f))
-                        image = tf.image.decode_jpeg(image, channels=3)
-                        image = tf.cast(image, tf.float32) / 255.0
-                        conf_set[i].append(image)
-                        num += 1
-                conf_set[i] = tf.stack(conf_set[i], axis=0)
-            conf_set = tf.concat(conf_set, axis=0)
+        path = conf_path
+        for i in range(num_classes):
+            num = 0
+            shap_path = os.path.join(path, f"{i}")
+            assert Path(shap_path).exists()
+            files = os.listdir(shap_path)
+            for f in files:
+                if "neg.pt" in f:
+                    num += 1
+            if num < conf_per_class:
+                conf_per_class = num
+
+        for i in range(num_classes):
+            shap_path = os.path.join(path, f"{i}")
+            assert Path(shap_path).exists()
+            files = os.listdir(shap_path)
+            num = 0
+            for f in files:
+                if "neg.pt" in f and num < conf_per_class:  # 限制读取每类最多 conf_per_class 个文件
+                    image = tf.io.read_file(os.path.join(shap_path, f))
+                    image = tf.image.decode_jpeg(image, channels=3)
+                    image = tf.cast(image, tf.float32) / 255.0
+                    conf_set[i].append(image)
+                    num += 1
+
+            conf_set[i] = tf.stack(conf_set[i], axis=0)
+        conf_set = tf.concat(conf_set, axis=0)
+
 ############################################
         self.confounder_queue = tf.Variable(conf_set)
-        _, class_num, _, _ = self.confounder_queue.shape
+        #_, class_num, _, _ = self.confounder_queue.shape
+        class_num= self.confounder_queue.shape
         print(self.confounder_queue.shape)
 
         self.K = class_num
-        self.N = cfg.train.class_conf_size
-        self.nclass = num_classes
+        self.N = 10
+        #self.nclass = num_classes
 ############################################
     def batch_sample_set(self, x_s, label):
         bs_size = tf.shape(x_s)[0]
@@ -101,11 +78,11 @@ class NFCBank(tf.keras.Model):
 
 
 class CSANet(tf.keras.Model):
-    def __init__(self, backbone=None, num_classes=10, conf_per_class=5000, use_conf=False, mask_alpha=None):
+    def __init__(self, backbone=None, num_classes=10, conf_per_class=5000, use_conf=False, mask_alpha=None, conf_path=None):
         #super(CSANetwork, self).__init__()
         super().__init__()
         self.backbone = backbone
-        self.erb = NFCBank(num_classes=num_classes, conf_per_class=conf_per_class)
+        self.erb = NFCBank(conf_path=conf_path, num_classes=num_classes, conf_per_class=conf_per_class)
         self.test_CSA = use_conf
         self.mask_alpha = mask_alpha
         if self.test_CSA:
