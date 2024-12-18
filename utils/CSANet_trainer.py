@@ -7,6 +7,7 @@ from tensorflow.keras.callbacks import LearningRateScheduler
 import os
 import random
 import numpy as np
+from utils.model_ResNet18 import ResNet18
 
 mean = tf.constant([0.4914, 0.4822, 0.4465], dtype=tf.float32)
 std = tf.constant([0.2023, 0.1994, 0.2010], dtype=tf.float32)
@@ -70,7 +71,7 @@ lr_scheduler = LearningRateScheduler(learning_rate_schedule)
 
 
 class CSANet_trainer():
-    def __init__(self, train_ds, test_ds, num_classes, epochs, batch_size, lr, momentum, decay, checkpoint_dir, backbone=None, conf_per_class=5000, conf_path=None, epsilon=0.1, pgd_iter=10, pgd_alpha=0.01):##########
+    def __init__(self, train_ds, test_ds, num_classes, epochs, batch_size, lr, momentum, decay, checkpoint_dir, pgd_attack, use_csa, backbone=None, conf_per_class=5000, conf_path=None, epsilon=0.1, pgd_iter=10, pgd_alpha=0.01):##########
         
         self.train_ds = train_ds
         self.test_ds = test_ds
@@ -86,6 +87,7 @@ class CSANet_trainer():
         self.epsilon = epsilon
         self.pgd_iter = pgd_iter
         self.pgd_alpha = pgd_alpha
+        self.pgd_attack = pgd_attack
         
         self.train_loss_history = []
         self.train_accuracy_history = []
@@ -93,15 +95,18 @@ class CSANet_trainer():
         self.test_accuracy_history = []
         self.test_adv_accuracy_history = []
         
-        self.backbone = backbone# if backbone else ResNet18(num_classes=num_classes)  # ResNet18 是一个例子
+        self.backbone = backbone# if backbone else ResNet18(num_classes=num_classes)  # ResNet18
+        self.use_csa = use_csa
         self.conf_per_class = conf_per_class
         self.conf_path = conf_path
 
         
     def init_model(self):
-        #self.model = ResNet18(num_classes=self.num_classes)
-        self.model = CSANet(backbone=self.backbone, num_classes=self.num_classes, conf_per_class=self.conf_per_class,
-                            conf_path=self.conf_path)
+        if self.use_csa:
+            self.model = CSANet(backbone=self.backbone, num_classes=self.num_classes, conf_per_class=self.conf_per_class,conf_path=self.conf_path)
+        else:
+            self.model = ResNet18(num_classes=self.num_classes)
+            
         self.model.build((None, 32, 32, 3))
 
     def init_loss(self):
@@ -123,7 +128,7 @@ class CSANet_trainer():
     )
        
     def train_step(self, images, labels, adversarial_training=False):
-        if adversarial_training:
+        if self.pgd_attack:
             images = pgd_attack(self.model, images, labels, epsilon=self.epsilon, alpha=self.pgd_alpha, num_iter=self.pgd_iter)
             
             
@@ -159,7 +164,7 @@ class CSANet_trainer():
         tf.keras.backend.set_value(self.optimizer.lr, new_lr)
         
         for images, labels in self.train_ds:
-            adversarial_training = (epoch >= 30)  # 假设在第30个epoch后开始对抗训练
+            adversarial_training = True  #(epoch >= 30)
             self.train_step(images, labels, adversarial_training)
 
         for test_images, test_labels in self.test_ds:
@@ -189,9 +194,6 @@ class CSANet_trainer():
         else:
             print("No checkpoint found. Starting from scratch.")
             
-
-        
-        
 
     def run(self):
         self.init_model()
