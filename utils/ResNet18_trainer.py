@@ -5,6 +5,15 @@ from tensorflow.keras.layers import Conv2D, BatchNormalization, ReLU, GlobalAver
 from utils.model_ResNet18 import ResNet18, ResidualBlock
 from tensorflow.keras.callbacks import LearningRateScheduler
 import os
+import random
+
+def set_seed(seed_value=42):
+    random.seed(seed_value)
+    #np.random.seed(seed_value)
+    tf.random.set_seed(seed_value)
+
+set_seed(42)
+
 
 
 mean = tf.constant([0.4914, 0.4822, 0.4465], dtype=tf.float32)
@@ -45,8 +54,10 @@ def load_cifar10_dataset(batch_size):
 def learning_rate_schedule(epoch):
     if epoch >= 1 and epoch <= 120:
         return 0.1
-    else:
+    elif epoch > 120 and epoch <= 160:
         return 0.01
+    else:
+        return 0.001
 
 lr_scheduler = LearningRateScheduler(learning_rate_schedule)
 
@@ -65,6 +76,12 @@ class ResNet18_trainer():
         self.momentum = momentum
         self.decay = decay
         self.checkpoint_dir = checkpoint_dir
+        
+        self.train_loss_history = []
+        self.train_accuracy_history = []
+        self.test_loss_history = []
+        self.test_accuracy_history = []
+
         
         #self.saved_train_loss = None
         #self.saved_train_accuracy = None
@@ -131,6 +148,12 @@ class ResNet18_trainer():
                                self.train_accuracy.result() * 100,
                                self.test_loss.result(),
                                self.test_accuracy.result() * 100))
+        
+        self.train_loss_history.append(self.train_loss.result().numpy())
+        self.train_accuracy_history.append(self.train_accuracy.result().numpy() * 100)
+        self.test_loss_history.append(self.test_loss.result().numpy())
+        self.test_accuracy_history.append(self.test_accuracy.result().numpy() * 100)
+
         
     def save_checkpoint(self, epoch):
         checkpoint_path = os.path.join(self.checkpoint_dir, f"ckpt_epoch_{epoch + 1}.h5")
