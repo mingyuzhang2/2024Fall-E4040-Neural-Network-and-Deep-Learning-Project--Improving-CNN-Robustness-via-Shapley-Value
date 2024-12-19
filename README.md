@@ -39,6 +39,7 @@ To be populated by students, as shown in previous assignments.
 TODO: Create a directory/file tree
 ```
 ./
+├── E4040.2024Fall.MYZH.report.mz3088.pdf
 ├── Notebook1_140epoch.ipynb
 ├── Notebook1_60epoch.ipynb
 ├── Notebook2_pgd_attack_False_use_csa_False.ipynb
@@ -65,7 +66,7 @@ TODO: Create a directory/file tree
     ├── model_CSANet.py
     └── model_ResNet18.py
 
-5 directories, 20 files
+5 directories, 21 files
 
 ```
 
