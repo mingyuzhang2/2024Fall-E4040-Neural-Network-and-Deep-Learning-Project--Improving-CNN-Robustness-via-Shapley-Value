@@ -9,7 +9,7 @@ import random
 import numpy as np
 from utils.model_ResNet18 import ResNet18
 
-mean = tf.constant([0.4914, 0.4822, 0.4465], dtype=tf.float32)
+mean = tf.constant([0.4914, 0.4822, 0.4465], dtype=tf.float32)#mean and std of cifar10
 std = tf.constant([0.2023, 0.1994, 0.2010], dtype=tf.float32)
 
 def transform_train(image, label):
@@ -17,7 +17,6 @@ def transform_train(image, label):
     image = tf.image.resize_with_crop_or_pad(image, 40, 40)
     image = tf.image.random_crop(image, size=[32, 32, 3])
     image = tf.image.random_flip_left_right(image)
-    
     image = (image - mean) / std
     
     return image, label
@@ -25,7 +24,6 @@ def transform_train(image, label):
 def transform_test(image, label):
     image = tf.image.convert_image_dtype(image, tf.float32)
     image = (image - mean) / std
-    
     return image, label
 
 def load_cifar10_dataset(batch_size):
@@ -33,7 +31,7 @@ def load_cifar10_dataset(batch_size):
     
     train_ds = tf.data.Dataset.from_tensor_slices((X_train, y_train))
     train_ds = train_ds.map(transform_train, num_parallel_calls=tf.data.AUTOTUNE)
-    train_ds = train_ds.shuffle(50000).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    train_ds = train_ds.shuffle(50000).batch(batch_size).prefetch(tf.data.AUTOTUNE) #using Data Augmentation
     
     test_ds = tf.data.Dataset.from_tensor_slices((X_val, y_val))
     test_ds = test_ds.map(transform_test, num_parallel_calls=tf.data.AUTOTUNE)
@@ -41,25 +39,25 @@ def load_cifar10_dataset(batch_size):
     
     return train_ds, test_ds
 
-def pgd_attack(model, images, labels, epsilon=0.1, alpha=0.01, num_iter=10):
+def pgd_attack(model, images, labels, epsilon=0.1, alpha=0.01, num_iter=10): #pgd attack
 
-    images_adv = tf.Variable(images, dtype=tf.float32)
-    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
+    images_adv = tf.Variable(images, dtype=tf.float32)# Convert the input images to a TensorFlow variable to allow updates during the attack process
+    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()# Define the loss function
 
-    for _ in range(num_iter):
-        with tf.GradientTape() as tape:
+    for _ in range(num_iter):# Perform the PGD attack for a specified number of iterations
+        with tf.GradientTape() as tape: # Watch the images_adv variable so that we can compute the gradient with respect to it
             tape.watch(images_adv)
             predictions = model(images_adv, training=True)
             loss = loss_fn(labels, predictions)
         gradients = tape.gradient(loss, images_adv)
         signed_grad = tf.sign(gradients)
-        images_adv.assign_add(alpha * signed_grad)
-        perturbation = tf.clip_by_value(images_adv - images, -epsilon, epsilon)
+        images_adv.assign_add(alpha * signed_grad)# Update the adversarial images by adding the signed gradient scaled by alpha
+        perturbation = tf.clip_by_value(images_adv - images, -epsilon, epsilon)# Apply the perturbation to the original images to generate the adversarial examples
         images_adv.assign(images + perturbation)
 
     return images_adv
 
-def learning_rate_schedule(epoch):
+def learning_rate_schedule(epoch):# Define the learning rate schedule based on the current epoch number
     if epoch >= 1 and epoch <= 90:
         return 0.1
     elif epoch > 90 and epoch <= 120:
@@ -95,14 +93,14 @@ class CSANet_trainer():
         self.test_accuracy_history = []
         self.test_adv_accuracy_history = []
         
-        self.backbone = backbone# if backbone else ResNet18(num_classes=num_classes)  # ResNet18
+        self.backbone = backbone
         self.use_csa = use_csa
         self.conf_per_class = conf_per_class
         self.conf_path = conf_path
 
         
     def init_model(self):
-        if self.use_csa:
+        if self.use_csa: #use_csa means using CSA training. It not, just ResNet18
             self.model = CSANet(backbone=self.backbone, num_classes=self.num_classes, conf_per_class=self.conf_per_class,conf_path=self.conf_path)
         else:
             self.model = ResNet18(num_classes=self.num_classes)
@@ -128,7 +126,7 @@ class CSANet_trainer():
     )
        
     def train_step(self, images, labels, adversarial_training=False):
-        if self.pgd_attack:
+        if self.pgd_attack: #if true, use pgd attack. I used pdg10 and pdg 20
             images = pgd_attack(self.model, images, labels, epsilon=self.epsilon, alpha=self.pgd_alpha, num_iter=self.pgd_iter)
             
             
@@ -137,7 +135,7 @@ class CSANet_trainer():
             loss = self.loss_function(labels, predictions)
         #gradients = tape.gradient(loss, self.model.trainable_variables)
         gradients = tape.gradient(loss, self.model.trainable_variables, 
-                unconnected_gradients=tf.UnconnectedGradients.ZERO)
+                unconnected_gradients=tf.UnconnectedGradients.ZERO)#####this is very important, without UnconnectedGradients.ZERO there will be warnings about gradiant 0. I spent 8 hours on it...
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         
         self.train_loss(loss)

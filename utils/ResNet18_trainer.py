@@ -14,15 +14,16 @@ import random
 
 #set_seed(42)
 
+#######when I set seed some how there are overfitting.
 
 
-mean = tf.constant([0.4914, 0.4822, 0.4465], dtype=tf.float32)
+mean = tf.constant([0.4914, 0.4822, 0.4465], dtype=tf.float32)###cifar10 mean and std
 std = tf.constant([0.2023, 0.1994, 0.2010], dtype=tf.float32)
 
 def transform_train(image, label):
     image = tf.image.convert_image_dtype(image, tf.float32)
     image = tf.image.resize_with_crop_or_pad(image, 40, 40)
-    image = tf.image.random_crop(image, size=[32, 32, 3])
+    image = tf.image.random_crop(image, size=[32, 32, 3])######data augmentation, no need to much
     image = tf.image.random_flip_left_right(image)
     
     image = (image - mean) / std
@@ -55,7 +56,7 @@ def load_cifar10_dataset(batch_size):
 
 
 
-def learning_rate_schedule(epoch):
+def learning_rate_schedule(epoch):# learning rate scheduler not really useful for me
     if epoch >= 1 and epoch <= 90:
         return 0.1
     elif epoch > 90 and epoch <= 120:
